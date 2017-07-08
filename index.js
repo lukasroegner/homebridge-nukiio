@@ -68,27 +68,7 @@ function NukiLockAccessory(log, config, nukiBridge) {
     this.lockServiceUnlock
         .getCharacteristic(Characteristic.LockTargetState)
         .on('get', this.getState.bind(this))
-        .on('set', this.setState.bind(this, "unlock"));
-    
-    if(this.usesDoorLatch) {
-        this.lockServiceUnlatch = new Service.LockMechanism(this.name + " Unlatch", this.name + " Unlatch");
-        this.lockServiceUnlatch
-            .getCharacteristic(Characteristic.LockCurrentState)
-            .on('get', this.getState.bind(this));
-        this.lockServiceUnlatch
-            .getCharacteristic(Characteristic.LockTargetState)
-            .on('get', this.getState.bind(this))
-            .on('set', this.setState.bind(this, "unlatch"));
-        
-        this.lockServiceAlwaysUnlatch = new Service.LockMechanism(this.name + " ALWAYS Unlatch", this.name + " ALWAYS Unlatch");
-        this.lockServiceAlwaysUnlatch
-            .getCharacteristic(Characteristic.LockCurrentState)
-            .on('get', this.getStateAlwaysUnlatch.bind(this));
-        this.lockServiceAlwaysUnlatch
-            .getCharacteristic(Characteristic.LockTargetState)
-            .on('get', this.getStateAlwaysUnlatch.bind(this))
-            .on('set', this.setStateAlwaysUnlatch.bind(this));
-    }
+        .on('set', this.setState.bind(this, this.usesDoorLatch ? "unlatch" : "unlock"));
 
     this.battservice = new Service.BatteryService(this.name);
     this.battservice
@@ -105,9 +85,6 @@ function NukiLockAccessory(log, config, nukiBridge) {
         var newHomeKitStateLocked = isLocked ? Characteristic.LockTargetState.SECURED : Characteristic.LockTargetState.UNSECURED;
         var newHomeKitStateBatteryCritical = batteryCritical ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL
         this.lockServiceUnlock.getCharacteristic(Characteristic.LockTargetState).setValue(newHomeKitStateLocked, undefined, CONTEXT_FROM_NUKI_BACKGROUND); 
-        if(this.usesDoorLatch) {
-            this.lockServiceUnlatch.getCharacteristic(Characteristic.LockTargetState).setValue(newHomeKitStateLocked, undefined, CONTEXT_FROM_NUKI_BACKGROUND);  
-        }
         this.battservice.getCharacteristic(Characteristic.StatusLowBattery).setValue(newHomeKitStateBatteryCritical, undefined, CONTEXT_FROM_NUKI_BACKGROUND);
         this.log("HomeKit state change by webhook complete. New isLocked = '%s' and batteryCritical = '%s'.", isLocked, batteryCritical);
     }).bind(this);
@@ -116,49 +93,6 @@ function NukiLockAccessory(log, config, nukiBridge) {
 
 NukiLockAccessory.prototype.getState = function(callback) {
     this.nukiLock.isLocked(callback);
-};
-
-NukiLockAccessory.prototype.getStateAlwaysUnlatch = function(callback) {
-    var locked = true;
-    callback(null, locked);
-};
-
-NukiLockAccessory.prototype.setStateAlwaysUnlatch = function(homeKitState, callback, context) {
-    var doLock = homeKitState == Characteristic.LockTargetState.SECURED;
-    if(doLock) {
-        this.lockServiceAlwaysUnlatch.setCharacteristic(Characteristic.LockCurrentState, Characteristic.LockCurrentState.SECURED);
-        if(callback) {
-            callback(null);
-        }
-    }
-    else {
-        var lockStateChangeCallback = (function(params, err, json){
-            if(err && err.nukiUnsuccessfulError && params.lockTry < 2) {
-                this.log("An error occured processing lock action. Will retry now...");
-                params.lockTry = params.lockTry + 1;
-                this.nukiLock.unlatch(lockStateChangeCallback);
-            }
-            else {
-                if(err) {
-                    if(params.lockTry == 1) {
-                        this.log("An error occured processing lock action. Reason: %s", err);
-                    }  
-                    else {
-                        this.log("An error occured processing lock action after retrying multiple times. Reason: %s", err); 
-                    }
-                }
-                this.lockServiceAlwaysUnlatch.setCharacteristic(Characteristic.LockCurrentState, Characteristic.LockCurrentState.UNSECURED);
-                callback(null);
-                setTimeout((function(){
-                    this.lockServiceAlwaysUnlatch.getCharacteristic(Characteristic.LockTargetState).setValue(Characteristic.LockTargetState.SECURED, undefined, CONTEXT_FROM_NUKI_BACKGROUND);
-                    this.log("HomeKit change for door latch back to locked state complete.");
-                }).bind(this), 1000);
-                this.log("HomeKit state change complete.");
-            }
-        }).bind(this, {lockTry: 1});
-        
-        this.nukiLock.unlatch(lockStateChangeCallback);
-    }
 };
 
 NukiLockAccessory.prototype.setState = function(unlockType, homeKitState, callback, context) {
@@ -181,18 +115,12 @@ NukiLockAccessory.prototype.setState = function(unlockType, homeKitState, callba
             }
             else {
                 this.lockServiceUnlock.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-                if(this.usesDoorLatch) {
-                    this.lockServiceUnlatch.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-                }
                 callback(err);
                 this.log("An error occured processing lock action after retrying multiple times. Reason: %s", err);
             }
         }
         else {
             this.lockServiceUnlock.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-            if(this.usesDoorLatch) {
-                this.lockServiceUnlatch.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-            }
             callback(null);
             if(err) {
                 this.log("An error occured processing lock action. Reason: %s", err); 
@@ -203,9 +131,6 @@ NukiLockAccessory.prototype.setState = function(unlockType, homeKitState, callba
     
     if(context === CONTEXT_FROM_NUKI_BACKGROUND) {
         this.lockServiceUnlock.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-        if(this.usesDoorLatch) {
-            this.lockServiceUnlatch.setCharacteristic(Characteristic.LockCurrentState, newHomeKitState);
-        }
         if(callback) {
             callback(null);
         }
@@ -246,9 +171,6 @@ NukiLockAccessory.prototype.getLowBatt = function(callback) {
 };
 
 NukiLockAccessory.prototype.getServices = function() {
-    if(this.usesDoorLatch) {
-        return [this.lockServiceUnlock, this.lockServiceUnlatch, this.lockServiceAlwaysUnlatch, this.informationService, this.battservice];
-    }
     return [this.lockServiceUnlock, this.informationService, this.battservice];
 };
 

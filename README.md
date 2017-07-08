@@ -68,3 +68,7 @@ pulling the door latch ("lockname"), and one that always is display as locked an
 # Additional information
 The plugin uses the Nuki API of the bridge. The API token can be configured via the Nuki app when enabling the API.
 The plugin was build on Nuki API documentation v1.0.3. Valid values for lock action and unlock action can be found in the Nuki API documentation.
+
+#Changes to the original implementation
+
+Even if the option "usesDoorLatch" is enabled a single lock is displayed, which always unlatches.
